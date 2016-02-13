@@ -93,21 +93,22 @@ def temperatureCheck() {
 	log.debug("HeatSetPoint: ${heatPoint}");
     
     def desiredTemp = Math.min(thermTemp, heatPoint);
-    if (maxtemp) {
-    	desiredTemp = Math.min(maxtemp, desiredTemp);
-    }
     def actualDifference = desiredTemp - sensorTemp;
     log.debug("Desired: ${desiredTemp}");
 	log.debug("Diff: ${actualDifference}");
     
     def turnOn = true;
-    if (mode != 'heat' && mode != 'auto')
+    if (!isActiveMode)
+    	turnOn = false;
+    else if (mode != 'heat' && mode != 'auto')
     	turnOn = false;
     else if (presence != 'present')
     	turnOn = false;
     else if (opState != 'idle' && opState != 'fan only')
     	turnOn = false;
     else if (actualDifference <= 2)
+    	turnOn = false;
+    else if (sensorTemp >= maxtemp)
     	turnOn = false;
         
     log.debug("Set boost state: ${turnOn}");
