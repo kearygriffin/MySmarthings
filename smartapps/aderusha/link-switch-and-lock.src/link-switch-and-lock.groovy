@@ -27,6 +27,7 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  */
+import groovy.json.JsonSlurper
 
 definition(
 	name: "Link Switch and Lock",
@@ -40,7 +41,7 @@ definition(
 
 preferences {
 	section("When this switch is turned on") {
-		input "switch1", "device.simulatedSwitch", multiple: false, required: true
+		input "switch1", "capability.switch", multiple: false, required: true
 	}
 	section("Lock this lock") {
 		input "lock1", "capability.lock", multiple: false, required: true
@@ -66,9 +67,15 @@ def updated()
 
 def onHandler(evt) {
 	log.debug evt.value
-    def data = evt.getData();
-    
-    if (!data || !data.ignoreFlag) {
+	def force = false
+    if (evt.data && evt.data != "") {
+        def slurper = new JsonSlurper()
+    	def data = slurper.parseText(evt.data)
+        if (data && data['force'])
+        	force = true
+    }
+
+	if (!force) {
 		log.debug "Locking lock: $lock1"
 		lock1.lock()        
     } else {
@@ -78,9 +85,16 @@ def onHandler(evt) {
 
 def offHandler(evt) {
 	log.debug evt.value
-    def data = evt.getData();
-    
-    if (!data || !data.ignoreFlag) {    
+
+	def force = false
+    if (evt.data && evt.data != "") {
+	    def slurper = new JsonSlurper()    
+    	def data = slurper.parseText(evt.data)
+        if (data && data['force'])
+        	force = true
+    }
+
+    if (!force) { 
         log.debug "Unlocking lock: $lock1"
         lock1.unlock()
     } else {
