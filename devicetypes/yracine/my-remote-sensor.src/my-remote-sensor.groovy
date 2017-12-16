@@ -1,6 +1,6 @@
 /**
  *  My Remote Sensor
- *  v1.1.2
+ *  v1.1.3
  *
  *  Copyright 2015 Yves Racine
  *  LinkedIn profile: ca.linkedin.com/pub/yves-racine-m-sc-a/0/406/4b/
@@ -41,13 +41,19 @@ metadata {
 
 	// UI tile definitions
 	tiles(scale: 2) {
-		multiAttributeTile(name:"motion", type: "generic", width: 2, height: 2){
-			tileAttribute ("device.motion", key: "PRIMARY_CONTROL") {
-				attributeState "active", label:'motion', icon:"st.motion.motion.active", backgroundColor:"#53a7c0"
-				attributeState "inactive", label:'no motion', icon:"st.motion.motion.inactive", backgroundColor:"#ffffff"
+		multiAttributeTile(name:"remoteMulti", type: "generic", width: 2, height: 2, canChangeIcon: true){
+			tileAttribute("device.temperatureDisplay", key: "PRIMARY_CONTROL") {
+				attributeState("default", label:'${currentValue}°', unit:"dF", backgroundColor:"#269bd2") 
 			}
+			tileAttribute("device.motion", key: "SECONDARY_CONTROL") {
+				attributeState("default", label:'${currentValue}')			
+			}	
 		}
-		valueTile("temperature", "device.temperature", width: 6, height: 4) {
+		standardTile("motion", "device.motion", inactiveLabel: false,, width:6, height:4, canChangeIcon: false) {
+			state "active", label:'motion', icon:"st.motion.motion.active", backgroundColor:"#53a7c0"
+			state "inactive", label:'no motion', icon:"st.motion.motion.inactive", backgroundColor:"#ffffff"
+		}	
+		valueTile("temperature", "device.temperature", width: 6, height: 4,canChangeIcon: true) {
 			state("temperature", label:'${currentValue}', unit:"F",
 				backgroundColors:[
 					// Celsius Color Range
