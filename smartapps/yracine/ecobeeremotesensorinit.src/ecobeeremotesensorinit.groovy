@@ -1,5 +1,5 @@
 /**
- *  ecobee3RemoteSensorsInit
+ *  ecobeeRemoteSensorsInit
  *
  *  Copyright 2015 Yves Racine
  *  LinkedIn profile: ca.linkedin.com/pub/yves-racine-m-sc-a/0/406/4b/
@@ -15,7 +15,7 @@
  *  Software Distribution is restricted and shall be done only with Developer's written approval.
  *
  *  For installation, please refer to readme file under
- *     https://github.com/yracine/device-type.myecobee/blob/master/smartapps/readme.ecobee3RemoteSensor
+ *     https://github.com/yracine/device-type.myecobee/blob/master/smartapps/ecobeeRemoteSensor.md
  *
  */
 definition(
@@ -28,23 +28,26 @@ definition(
 	iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Partner/ecobee@2x.png"
 )
 
+
+def get_APP_VERSION() {return "2.8.1"}
+
 preferences {
 
 	page(name: "selectThermostat", title: "Ecobee Thermostat", install: false, uninstall: true, nextPage: "selectEcobeeSensors") {
 		section("About") {
 			paragraph "${get_APP_NAME()}, the smartapp that creates individual ST sensors for your ecobee3's remote Sensors and polls them on a regular basis"
-			paragraph "Version 2.6.4"
+			paragraph "Version ${get_APP_VERSION()}"
 			paragraph "If you like this smartapp, please support the developer via PayPal and click on the Paypal link below " 
-				href url: "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=yracine%40yahoo%2ecom&lc=US&item_name=Maisons%20ecomatiq&no_note=0&currency_code=USD&bn=PP%2dDonationsBF%3abtn_donateCC_LG%2egif%3aNonHostedGuest",
+				href url: "https://www.paypal.me/ecomatiqhomes",
 					title:"Paypal donation..."
-			paragraph "Copyright�2014 Yves Racine"
+			paragraph "Copyright©2014 Yves Racine"
 				href url:"http://github.com/yracine/device-type.myecobee", style:"embedded", required:false, title:"More information..." 
 		}
 		section("Select the ecobee thermostat") {
 			input "ecobee", "capability.thermostat", title: "Which ecobee thermostat?"
 
 		}
-		section("Polling ecobee3's remote3 sensor(s) at which interval in minutes (range=[5,10,15,30],default =5 min.)?") {
+		section("Polling ecobee's remote sensor(s) at which interval in minutes (range=[5,10,15,30],default =5 min.)?") {
 			input "givenInterval", "number", title: "Interval", required: false
 		}
 
@@ -71,6 +74,13 @@ preferences {
 			input "phoneNumber", "phone", title: "Send a text message?", required: false
 			input "detailedNotif", "bool", title: "Detailed Logging & Notifications?", required:false
 			input "logFilter", "enum", title: "log filtering [Level 1=ERROR only,2=<Level 1+WARNING>,3=<2+INFO>,4=<3+DEBUG>,5=<4+TRACE>]?", required:false, metadata: [values: [1,2,3,4,5]]
+		}
+		section("Enable Amazon Echo/Ask Alexa Notifications [optional, default=false]") {
+			input (name:"askAlexaFlag", title: "Ask Alexa verbal Notifications?", type:"bool",
+				description:"optional",required:false)
+			input (name:"listOfMQs",  type:"enum", title: "List of the Ask Alexa Message Queues (default=Primary)", options: state?.askAlexaMQ, multiple: true, required: false,
+				description:"optional")            
+			input "AskAlexaExpiresInDays", "number", title: "Ask Alexa's messages expiration in days (default=2 days)?", required: false
 		}
 		section([mobileOnly: true]) {
 			label title: "Assign a name for this SmartApp", required: false
@@ -219,8 +229,6 @@ def initialize() {
 	subscribe(ecobee, "remoteSensorTmpData", updateRemoteSensors)
 	subscribe(ecobee, "remoteSensorHumData", updateRemoteSensors)
 */
-	deleteRemoteSensors()
-	createRemoteSensors()
 
 
 	Integer delay = givenInterval ?: 5 // By default, do it every 5 min.
@@ -252,7 +260,20 @@ def initialize() {
 	subscribe(app, appTouch)
 
 	traceEvent(settings.logFilter,"initialize>polling delay= ${delay}...", detailedNotif, get_LOG_TRACE())
+	subscribe(location, "askAlexaMQ", askAlexaMQHandler)
+	deleteRemoteSensors()
+	createRemoteSensors()
+
 	rescheduleIfNeeded()   
+}
+
+def askAlexaMQHandler(evt) {
+	if (!evt) return
+	switch (evt.value) {
+		case "refresh":
+		state?.askAlexaMQ = evt.jsonData && evt.jsonData?.queues ? evt.jsonData.queues : []
+		break
+	}
 }
 
 def appTouch(evt) {
@@ -289,7 +310,16 @@ def rescheduleIfNeeded(evt) {
 }
 
 def takeAction() {
-	def todayDay = new Date().format("dd",location.timeZone)
+
+	def todayDay
+    
+	if (!location.timeZone) {    	
+		traceEvent(settings.logFilter,"takeAction>Your location is not set in your ST account, you'd need to set it as indicated in the prerequisites for better exception handling..",
+			true,get_LOG_ERROR(),true)
+	} else {
+		todayDay = new Date().format("dd",location.timeZone)
+	}        
+
 	if ((!state?.today) || (todayDay != state?.today)) {
 		state?.exceptionCount=0   
 		state?.sendExceptionCount=0        
@@ -311,9 +341,9 @@ def takeAction() {
 
     
 	def MAX_EXCEPTION_COUNT=10
-	String exceptionCheck, msg 
+	String exceptionCheck
 	traceEvent(settings.logFilter,"takeAction>about to call generateRemoteSensorEvents()", detailedNotif)
-	ecobee.poll()
+	ecobee.refresh()
 	ecobee.generateRemoteSensorEvents("", false)	
 	exceptionCheck= ecobee.currentVerboseTrace.toString()
 	if (handleException) {            
@@ -331,8 +361,8 @@ def takeAction() {
 	if (handleException) {            
 		if (state?.exceptionCount>=MAX_EXCEPTION_COUNT) {
 			// may need to authenticate again    
-			msg="too many exceptions/errors, $exceptionCheck (${state?.exceptionCount} errors), you may need to re-authenticate at ecobee..." 
-			traceEvent(settings.logFilter,"ecobee3RemoteSensorInit>${msg}", detailedNotif, get_LOG_ERROR())
+			traceEvent(settings.logFilter,"too many exceptions/errors, $exceptionCheck (${state?.exceptionCount} errors), you may need to re-authenticate at ecobee...", detailedNotif, 
+				get_LOG_ERROR(),true)
 		}            
 	}    
     
@@ -373,11 +403,11 @@ private updateMotionValues() {
 		def ecobeeSensorType = ecobeeSensorDetails[2]
 		String ecobeeSensorValue = ecobeeSensorDetails[3].toString()
 
-		def dni = [app.id, ecobeeSensorName, getRemoteSensorChildName(), ecobeeSensorId].join('.')
+		def remoteSensorFound= getChildDevices().findAll {
+			it.device.deviceNetworkId.contains(ecobeeSensorId)
+		}
 
-		def device = getChildDevice(dni)
-
-		if (device) {
+		if (remoteSensorFound) {
 			traceEvent(settings.logFilter,"updateMotionValues>ecobeeSensorId=$ecobeeSensorId",detailedNotif)
 			traceEvent(settings.logFilter,"updateMotionValues>ecobeeSensorName=$ecobeeSensorName",detailedNotif)
 			traceEvent(settings.logFilter,"updateMotionValues>ecobeeSensorType=$ecobeeSensorType",detailedNotif)
@@ -386,14 +416,17 @@ private updateMotionValues() {
 			String status = (ecobeeSensorValue.contains('false')) ? "inactive" : "active"
 /*            
 			boolean isChange = device.isStateChange(device, "motion", status)
-			boolean isDisplayed = isChange
-			traceEvent(settings.logFilter,"device $device, found $dni,statusChanged=${isChange}, value= ${status}",detailedNotif)
+			boolean isDisplayed = isChange"device $device, found $dni,statusChanged=${isChange},  value= ${status}",detailedNotif)
 */            
+			traceEvent(settings.logFilter,"found device $remoteSensorFound, latest motion value from ecobee API= ${status}", detailedNotif, 
+				get_LOG_INFO(),  detailedNotif)
 
-			device.sendEvent(name: "motion", value: status)
+			remoteSensorFound.each {
+				it.sendEvent(name: "motion", value: status)
+			}                
 		} else {
 
-			traceEvent(settings.logFilter,"updateMotionValues>couldn't find device $ecobeeSensorName with dni $dni, probably not selected originally",detailedNotif)
+			traceEvent(settings.logFilter,"updateMotionValues>couldn't find device $ecobeeSensorName with id $ecobeeSensorId, probably not selected originally",detailedNotif)
 		}
 
 	}
@@ -425,11 +458,10 @@ private updateTempValues() {
 		def ecobeeSensorValue = ecobeeSensorDetails[3]
 
 
-		def dni = [app.id, ecobeeSensorName, getRemoteSensorChildName(), ecobeeSensorId].join('.')
-
-		def device = getChildDevice(dni)
-
-		if (device) {
+		def remoteSensorFound= getChildDevices().findAll {
+			it.device.deviceNetworkId.contains(ecobeeSensorId)
+		}
+		if (remoteSensorFound) {
 
 			traceEvent(settings.logFilter,"updateTempValues>ecobeeSensorId= $ecobeeSensorId",detailedNotif)
 			traceEvent(settings.logFilter,"updateTempValues>ecobeeSensorName= $ecobeeSensorName",detailedNotif)
@@ -448,12 +480,14 @@ private updateTempValues() {
 				boolean isChange = device.isTemperatureStateChange(device, "temperature", tempValueString)
 				boolean isDisplayed = isChange
 */                
-				traceEvent(settings.logFilter,"device $device, found $dni, value= ${tempValueString}", detailedNotif)
-
-				device.sendEvent(name: "temperature", value: tempValueString, unit: scale,  isStateChange: true)
+				traceEvent(settings.logFilter,"found device $remoteSensorFound, latest temp value from ecobee API= ${tempValueString}", detailedNotif, 
+					get_LOG_INFO(), detailedNotif)
+				remoteSensorFound.each {
+					it.sendEvent(name: "temperature", value: tempValueString, unit: scale,  isStateChange: true)
+				}                    
 			}
 		} else {
-			traceEvent(settings.logFilter,"updateTempValues>couldn't find device $ecobeeSensorName with dni $dni, probably not selected originally",detailedNotif)
+			traceEvent(settings.logFilter,"updateTempValues>couldn't find device $ecobeeSensorName with id $ecobeeSensorId, probably not selected originally",detailedNotif)
 		}
 
 	}
@@ -484,11 +518,11 @@ private updateHumidityValues() {
 		def ecobeeSensorValue = ecobeeSensorDetails[3]
 
 
-		def dni = [app.id, ecobeeSensorName, getRemoteSensorChildName(), ecobeeSensorId].join('.')
+		def remoteSensorFound= getChildDevices().findAll {
+			it.device.deviceNetworkId.contains(ecobeeSensorId)
+		}
 
-		def device = getChildDevice(dni)
-
-		if (device) {
+		if (remoteSensorFound) {
 
 			traceEvent(settings.logFilter,"updateHumidityValues>ecobeeSensorId= $ecobeeSensorId",detailedNotif)
 			traceEvent(settings.logFilter,"updateHumidityValues>ecobeeSensorName= $ecobeeSensorName",detailedNotif)
@@ -501,12 +535,15 @@ private updateHumidityValues() {
 /*
 				boolean isChange = device.isStateChange(device, "humidity", humValueString)
 				boolean isDisplayed = isChange
-				traceEvent(settings.logFilter,"device $device, found $dni,statusChanged=${isChange}, value= ${humValue}", detailedNotif)
 */
-				device.sendEvent(name: "humidity", value: humValueString, unit: '%')
+				traceEvent(settings.logFilter,"found device $remoteSensorFound, latest hum value from ecobee API= ${humValueString}", detailedNotif, 
+					get_LOG_INFO(),  detailedNotif)
+				remoteSensorFound.each {
+					it.sendEvent(name: "humidity", value: humValueString, unit: '%')
+				}                    
 			}	
 		} else {
-				traceEvent(settings.logFilter,"updateHumidityValues>couldn't find device $ecobeeSensorName with dni $dni, no child device found", detailedNotif)
+				traceEvent(settings.logFilter,"updateHumidityValues>couldn't find device $ecobeeSensorName with id $ecobeeSensorId, no child device found", detailedNotif)
 		}	
 	}
 }
@@ -552,12 +589,12 @@ private int get_LOG_DEBUG()	{return 4}
 private int get_LOG_TRACE()	{return 5}
 
 def traceEvent(filterLog, message, displayEvent=false, traceLevel=4, sendMessage=false) {
-int LOG_ERROR= get_LOG_ERROR()
-int LOG_WARN=  get_LOG_WARN()
-int LOG_INFO=  get_LOG_INFO()
-int LOG_DEBUG= get_LOG_DEBUG()
-int LOG_TRACE= get_LOG_TRACE()
-int filterLevel=(filterLog)?filterLog.toInteger():get_LOG_WARN()
+	int LOG_ERROR= get_LOG_ERROR()
+	int LOG_WARN=  get_LOG_WARN()
+	int LOG_INFO=  get_LOG_INFO()
+	int LOG_DEBUG= get_LOG_DEBUG()
+	int LOG_TRACE= get_LOG_TRACE()
+	int filterLevel=(filterLog)?filterLog.toInteger():get_LOG_WARN()
 
 	if (filterLevel >= traceLevel) {
 		if (displayEvent) {    
@@ -586,7 +623,7 @@ int filterLevel=(filterLog)?filterLog.toInteger():get_LOG_WARN()
 
 
 private send(msg, askAlexa=false) {
-int MAX_EXCEPTION_MSG_SEND=5
+	int MAX_EXCEPTION_MSG_SEND=5
 
 	// will not send exception msg when the maximum number of send notifications has been reached
 	if (msg.contains("exception")) {
@@ -599,18 +636,28 @@ int MAX_EXCEPTION_MSG_SEND=5
 	}    
 	def message = "${get_APP_NAME()}>${msg}"
 
-	if (sendPushMessage != "No") {
+	if (sendPushMessage == "Yes") {
 		if (location.contactBookEnabled && recipients) {
 			traceEvent(settings.logFilter,"contact book enabled", false, get_LOG_INFO())
 			sendNotificationToContacts(message, recipients)
-    	} else {
+		} else {
 			traceEvent(settings.logFilter,"contact book not enabled", false, get_LOG_INFO())
 			sendPush(message)
 		}            
 	}
 	if (askAlexa) {
-		sendLocationEvent(name: "AskAlexaMsgQueue", value: "${get_APP_NAME()}", isStateChange: true, descriptionText: msg)        
-	}        
+		def expiresInDays=(AskAlexaExpiresInDays)?:2    
+		sendLocationEvent(
+			name: "AskAlexaMsgQueue", 
+			value: "${get_APP_NAME()}", 
+			isStateChange: true, 
+			descriptionText: msg, 
+			data:[
+				queues: listOfMQs,
+				expires: (expiresInDays*24*60*60)  /* Expires after 2 days by default */
+			]
+		)
+	} /* End if Ask Alexa notifications*/
 	
 	if (phoneNumber) {
 		log.debug("sending text message")

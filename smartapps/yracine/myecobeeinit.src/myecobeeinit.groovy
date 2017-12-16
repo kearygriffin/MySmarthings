@@ -28,11 +28,15 @@ definition(
     iconUrl: "https://s3.amazonaws.com/smartapp-icons/Partner/ecobee.png",
     iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Partner/ecobee@2x.png"
 )
+
+def get_APP_VERSION() {return "3.3.2"}
+
 preferences {
 	page(name: "about", title: "About", nextPage: "auth")
 	page(name: "auth", title: "ecobee", content:"authPage", nextPage:"deviceList")
 	page(name: "deviceList", title: "ecobee", content:"ecobeeDeviceList",nextPage: "otherSettings")
 	page(name: "otherSettings", title: "Other Settings", content:"otherSettings", install:true)
+	page(name: "watchdogSettingsSetup")    
 }
 
 mappings {
@@ -42,11 +46,11 @@ mappings {
 
 def about() {
  	dynamicPage(name: "about", install: false, uninstall: true) {
- 		section("About") {	
+ 		section("") {	
 			paragraph "${get_APP_NAME()}, the smartapp that connects your Ecobee thermostat to SmartThings via cloud-to-cloud integration"
-			paragraph "Version 3.1.6\n" 
+			paragraph "Version ${get_APP_VERSION()}\n" 
 			paragraph "If you like this smartapp, please support the developer via PayPal and click on the Paypal link below " 
-				href url: "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=yracine%40yahoo%2ecom&lc=US&item_name=Maisons%20ecomatiq&no_note=0&currency_code=USD&bn=PP%2dDonationsBF%3abtn_donateCC_LG%2egif%3aNonHostedGuest",
+				href url: "https://www.paypal.me/ecomatiqhomes",
 					title:"Paypal donation..."
 			paragraph "Copyright�2014 Yves Racine"
 				href url:"http://github.com/yracine/device-type.myecobee", style:"embedded", required:false, title:"More information...", 
@@ -63,15 +67,9 @@ def otherSettings() {
 		section("Handle/Notify any exception proactively [default=false, you will not receive any exception notification]") {
 			input "handleExceptionFlag", "bool", title: "Handle exceptions proactively?", required: false
 		}
-		section("Watchdogs") {
-			input (name:"tempSensor", type:"capability.temperatureMeasurement", title: "What do I use as temperature sensor to restart smartapp processing?",
-				required: false, description: "Optional Watchdog- just use a single regular polling watchdog")
-			input (name:"motionSensor", type:"capability.motionSensor", title: "What do I use as a motion sensor to restart smartapp processing?",
-				required: false, description: "Optional Watchdog -just use a single regular polling watchdog")
-			input (name:"energyMeter", type:"capability.powerMeter", title: "What do I use as energy sensor to restart smartapp processing?",
-				required: false, description: "Optional Watchdog-  just use a single regular polling watchdog")
-			input (name:"powerSwitch", type:"capability.switch", title: "What do I use as Master on/off switch to restart smartapp processing?",
-				required: false, description: "Optional Watchdog - just use a single regular polling watchdog")
+		section("Scheduler's watchdog Settings (needed if any ST scheduling issues)") {
+			href(name: "toWatchdogSettingsSetup", page: "watchdogSettingsSetup",required:false,  description: "Optional",
+				title: "Scheduler's watchdog Settings", image: "${getCustomImagePath()}safeguards.jpg" ) 
 		}
 		section("Notifications & Logging") {
 			input "sendPushMessage", "enum", title: "Send a push notification?", metadata: [values: ["Yes", "No"]], required:
@@ -82,9 +80,12 @@ def otherSettings() {
 			input "detailedNotif", "bool", title: "Detailed Logging & Notifications?", required:false
 			input "logFilter", "enum", title: "log filtering [Level 1=ERROR only,2=<Level 1+WARNING>,3=<2+INFO>,4=<3+DEBUG>,5=<4+TRACE>]?", required:false, metadata: [values: [1,2,3,4,5]]
 		}
-		section("Enable Amazon Echo/Ask Alexa Notifications [optional, default=false]") {
-			input (name:"askAlexaFlag", title: "Ask Alexa verbal Notifications?", type:"bool",
+		section("Enable Amazon Echo/Ask Alexa Notifications for ecobee's Alerts or events (optional)") {
+			input (name:"askAlexaFlag", title: "Ask Alexa verbal Notifications [default=false]?", type:"bool",
 				description:"optional",required:false)
+			input (name:"listOfMQs",  type:"enum", title: "List of the Ask Alexa Message Queues (default=Primary)", options: state?.askAlexaMQ, multiple: true, required: false,
+				description:"optional")            
+			input "AskAlexaExpiresInDays", "number", title: "Ask Alexa's messages expiration in days (optional,default=5 days)?", required: false
 		}
 		section([mobileOnly:true]) {
 			label title: "Assign a name for this SmartApp", required: false
@@ -92,12 +93,36 @@ def otherSettings() {
 	}
 }
 
+def watchdogSettingsSetup() {
+	dynamicPage(name: "watchdogSettingsSetup", title: "Scheduler's Watchdog Settings ", uninstall: false) {
+		section("Watchdog options: the watchdog should be a single polling device amongst the choice of sensors below. The watchdog needs to be regularly polled every 5-10 minutes and will be used as a 'heartbeat' to reschedule if needed.") {
+			input (name:"tempSensor", type:"capability.temperatureMeasurement", title: "What do I use as temperature sensor to restart smartapp processing?",
+				required: false, description: "Optional Watchdog- just use a single polling device")
+			input (name:"motionSensor", type:"capability.motionSensor", title: "What do I use as a motion sensor to restart smartapp processing?",
+				required: false, description: "Optional Watchdog -just use a single polling device")
+			input (name:"energyMeter", type:"capability.powerMeter", title: "What do I use as energy sensor to restart smartapp processing?",
+				required: false, description: "Optional Watchdog-  just use a single polling device")
+			input (name:"powerSwitch", type:"capability.switch", title: "What do I use as Master on/off switch to restart smartapp processing?",
+				required: false, description: "Optional Watchdog - just use a single  polling device")
+		}
+		section {
+			href(name: "toOtherSettingsPage", title: "Back to Other Settings Page", page: "otherSettings")
+		}
+        
+	}
+}   
+
 def authPage() {
 	traceEvent(settings.logFilter,"authPage(),atomicState.oauthTokenProvided=${atomicState?.auth?.oauthTokenProvided}", detailedNotif)
 
 	if (!atomicState.accessToken) {
 		traceEvent(settings.logFilter,"about to create access token", detailedNotif)
-		createAccessToken()
+		try {        
+			createAccessToken()
+		} catch (e) {
+			traceEvent(settings.logFilter,"authPage() exception $e, not able to create access token, probable cause: oAuth is not enabled for MyEcobeeInit smartapp ", true, get_LOG_ERROR(), true)
+			exit            
+		}        
 		atomicState.accessToken = state.accessToken
 	}
 
@@ -159,9 +184,9 @@ def ecobeeDeviceList() {
 
 	stats = stats + ems
 	traceEvent(settings.logFilter,"ecobeeDeviceList>device list: $stats", detailedNotif)
-	def p = dynamicPage(name: "deviceList", title: "Select Your Thermostats [3 max].", uninstall: true) {
+	def p = dynamicPage(name: "deviceList", title: "Select Your Thermostats", uninstall: true) {
 		section(""){
-			paragraph "Tap below to see the list of ecobee thermostats available in your ecobee account. If you have disconnect issues with your ST account, select only 1 tstat and create 1 instance of MyEcobeeInit per tstat"
+			paragraph image: "${getCustomImagePath()}home1.png", "Tap below to see the list of ecobee thermostats available in your ecobee account. If you have disconnect issues with your ST account, select only 1 tstat and create 1 instance of MyEcobeeInit per tstat"
 			input(name: "thermostats", title:"", type: "enum", required:true, multiple:true, description: "Tap to choose", metadata:[values:stats])
 		}
 	}
@@ -179,12 +204,8 @@ def setParentAuthTokens(auth_data) {
 			send("MyEcobeeInit>setParentAuthTokens>begin auth_data: $auth_data")
 */
 			traceEvent(settings.logFilter,"setParentAuthTokens>begin auth_data: $auth_data",detailedNotif)
-		}            
-		atomicState.refreshToken = auth_data?.refresh_token
-		atomicState.authToken = auth_data?.access_token
-		atomicState.expiresIn=auth_data?.expires_in
-		atomicState.tokenType = auth_data?.token_type
-		atomicState.authexptime= auth_data?.authexptime
+		} 
+		save_auth_data(auth_data)        
 		refreshAllChildAuthTokens()
 		if (handleException) {
 /*
@@ -195,6 +216,16 @@ def setParentAuthTokens(auth_data) {
 		}            
 	}        
 
+}
+
+void save_auth_data(auth_data) {
+
+	atomicState.refreshToken = auth_data?.refresh_token
+	atomicState.authToken = auth_data?.access_token
+	atomicState.expiresIn=auth_data?.expires_in
+	atomicState.tokenType = auth_data?.token_type
+	atomicState.authexptime= auth_data?.authexptime
+	traceEvent(settings.logFilter,"save_auth_data>atomicState =$atomicState",detailedNotif)
 }
 
 def refreshAllChildAuthTokens() {
@@ -284,14 +315,14 @@ def getEcobeeThermostats(String type="") {
 				//refresh the auth token
 				if (resp.status == 500 || resp.data.status.code == 14) {
 					if (handleException) {            
-						traceEvent(settings.logFilter,"getEcobeeThermostats>Need to refresh your auth_token!, about to call refreshAuthToken()",detailedNotif)
+						traceEvent(settings.logFilter,"getEcobeeThermostats>Need to refresh your auth_token!, about to call refreshAuthToken()",detailedNotif, get_LOG_ERROR())
 					}                        
 					refreshAuthToken()
                     
 				} else {
 					if (handleException) {            
 						traceEvent(settings.logFilter,"getEcobeeThermostats>http status=${resp.status}: authentication error, invalid authentication method, lack of credentials, (resp status= ${resp.data.status.code})",
-							true, LOG_ERROR)
+							true, get_LOG_ERROR(), true)
 					}                        
 				}
 			}
@@ -352,6 +383,7 @@ def refreshAuthToken() {
 					atomicState.authToken = resp?.data?.access_token
 					atomicState.expiresIn=resp?.data?.expires_in
 					atomicState.tokenType = resp?.data?.token_type
+					atomicState?.clientId=stcid                    
 					def authexptime = new Date((now() + (resp?.data?.expires_in  * 1000))).getTime()
 					atomicState.authexptime=authexptime 						                        
 					traceEvent(settings.logFilter,"refreshAuthToken>new refreshToken = ${atomicState.refreshToken}", detailedNotif)
@@ -377,7 +409,7 @@ def refreshAuthToken() {
 			if (e.statusCode == UNAUTHORIZED_CODE) { //this issue might comes from exceed 20sec app execution, connectivity issue etc
 				log.error "refreshAuthToken>exception $e"
 				if (handleException) {            
-					traceEvent(settings.logFilter,"refreshAuthToken>exception $e", detailedNotif,get_LOG_ERROR())
+					traceEvent(settings.logFilter,"refreshAuthToken>exception $e", detailedNotif,get_LOG_ERROR(), true)
 				}            
 			}            
 	}    
@@ -405,6 +437,12 @@ def updated() {
 	}    
 	initialize()
 }
+
+def uninstalled() {
+	delete_child_devices()
+	revokeAccessToken()     
+}
+
 
 def offHandler(evt) {
 	traceEvent(settings.logFilter,"$evt.name: $evt.value", detailedNotif)
@@ -486,11 +524,6 @@ def initialize() {
 	traceEvent(settings.logFilter,"initialize begin...", detailedNotif)
 	atomicState?.exceptionCount=0    
 	atomicState?.poll = [ last: 0, rescheduled: now() ]
-    
-	Integer delay = givenInterval ?: 20 // By default, do it every 20 min.
-	delete_child_devices()	
-	create_child_devices()
-    
 	//Subscribe to different events (ex. sunrise and sunset events) to trigger rescheduling if needed
 	subscribe(location, "sunrise", rescheduleIfNeeded)
 	subscribe(location, "sunset", rescheduleIfNeeded)
@@ -512,10 +545,27 @@ def initialize() {
 	}
 
 	subscribe(app, appTouch)
+	subscribe(location, "askAlexaMQ", askAlexaMQHandler)
 
+	Integer delay = givenInterval ?: 20 // By default, do it every 20 min.
 	traceEvent(settings.logFilter,"initialize>polling delay= ${delay}...", detailedNotif)
-	rescheduleIfNeeded()   
+    
+	delete_child_devices()	
+	create_child_devices()
+    
 	atomicState?.alerts=[:]   
+	rescheduleIfNeeded()   
+
+}
+
+def askAlexaMQHandler(evt) {
+	if (!evt) return
+	switch (evt.value) {
+		case "refresh":
+		state?.askAlexaMQ = evt.jsonData && evt.jsonData?.queues ? evt.jsonData.queues : []
+		traceEvent(settings.logFilter,"askAlexaMQHandler>new refresh value=$evt.jsonData?.queues", detailedNotif, get_LOG_INFO())
+  		break
+	}
 }
 
 def appTouch(evt) {
@@ -558,15 +608,22 @@ def takeAction() {
 	def exceptionCheck    
 	def MAX_EXCEPTION_COUNT=10
 	boolean handleException = (handleExceptionFlag)?: false
-	def todayDay = new Date().format("dd",location.timeZone)
 	def alertsInfo    
+	def todayDay
     
+	if (!location.timeZone) {    
+		traceEvent(settings.logFilter,"takeAction>Your location is not set in your ST account, you'd need to set it as indicated in the prerequisites for alerting purposes..",true,
+			get_LOG_ERROR(),true)
+	} else {
+    
+		todayDay = new Date().format("dd",location.timeZone)
+	}        
 	if ((!atomicState?.today) || (todayDay != atomicState?.today)) {
 		atomicState?.alerts=[:] // reinitialize the alerts & exceptionCount every day
 		atomicState?.exceptionCount=0   
 		atomicState?.sendExceptionCount=0        
 		atomicState?.today=todayDay        
-	}   
+	}
 	Integer delay = givenInterval ?: 5 // By default, do it every 5 min.
 	atomicState?.poll["last"] = now()
 		
@@ -590,11 +647,12 @@ def takeAction() {
 			exceptionCheck = d.currentVerboseTrace.toString()
 			if (handleException) {            
 				if ((exceptionCheck) && ((exceptionCheck.contains("exception") || (exceptionCheck.contains("error")) && 
-					(!exceptionCheck.contains("Java.util.concurrent.TimeoutException")) && (!exceptionCheck.contains("No signature of method: physicalgraph.device.CommandService.executeAction")) &&
+					(!exceptionCheck.contains("TimeoutException")) && (!exceptionCheck.contains("No signature of method: physicalgraph.device.CommandService.executeAction")) &&
 					(!exceptionCheck.contains("UndeclaredThrowableException"))))) {  
 				// check if there is any exception or an error reported in the verboseTrace associated to the device (except the ones linked to rate limiting).
 					atomicState.exceptionCount=atomicState.exceptionCount+1    
-					traceEvent(settings.logFilter,"found exception/error after polling, exceptionCount= ${atomicState?.exceptionCount}: $exceptionCheck", true, get_LOG_ERROR(), true) 
+					traceEvent(settings.logFilter,"found exception/error after polling, exceptionCount= ${atomicState?.exceptionCount}: $exceptionCheck", true, 
+						get_LOG_ERROR()) 
 				} else {             
 					// reset exception counter            
 					atomicState?.exceptionCount=0      
@@ -630,8 +688,9 @@ def takeAction() {
 					// need to authenticate again    
 					atomicState.authToken=null                    
 					atomicState?.oauthTokenProvided=false
-					traceEvent(msg="$exceptionCheck after ${atomicState?.exceptionCount} errors, press on 'ecobee' and re-login..." , true, get_LOG_ERROR())
-				} else if (atomicState?.exceptionCount==MAX_EXCEPTION_COUNT) {
+					traceEvent(settings.logFilter,"$exceptionCheck after ${atomicState?.exceptionCount} errors, press on 'ecobee' and re-login..." , true, 
+						get_LOG_ERROR(),true)
+				} else if (atomicState?.exceptionCount >= MAX_EXCEPTION_COUNT) {
 					traceEvent(settings.logFilter,"too many exceptions/errors, $exceptionCheck (${atomicState?.exceptionCount} errors so far), you may need to press on 'ecobee' and re-login..." ,
 						true, get_LOG_ERROR(), true)
 				}
@@ -665,6 +724,7 @@ def oauthInitUrl() {
 	def stcid = getSmartThingsClientId();
 
 	atomicState.oauthInitState = UUID.randomUUID().toString()
+	atomicState?.clientId=stcid                    
 
 	def oauthParams = [
 		response_type: "code",
@@ -710,9 +770,10 @@ def callback() {
 		}
 		success()
 
-    } else {
-        traceEvent(settings.logFilter,"callback() failed. Validation of state did not match. oauthState != state.oauthInitState", true, get_LOG_ERROR())
-    }
+	} else {
+		fail()    
+		traceEvent(settings.logFilter,"callback() failed. Validation of state did not match. oauthState != state.oauthInitState", true, get_LOG_ERROR())
+	}
 
 }
 
@@ -850,12 +911,12 @@ private int get_LOG_DEBUG()	{return 4}
 private int get_LOG_TRACE()	{return 5}
 
 def traceEvent(filterLog, message, displayEvent=false, traceLevel=4, sendMessage=false) {
-int LOG_ERROR= get_LOG_ERROR()
-int LOG_WARN=  get_LOG_WARN()
-int LOG_INFO=  get_LOG_INFO()
-int LOG_DEBUG= get_LOG_DEBUG()
-int LOG_TRACE= get_LOG_TRACE()
-int filterLevel=(filterLog)?filterLog.toInteger():get_LOG_WARN()
+	int LOG_ERROR= get_LOG_ERROR()
+	int LOG_WARN=  get_LOG_WARN()
+	int LOG_INFO=  get_LOG_INFO()
+	int LOG_DEBUG= get_LOG_DEBUG()
+	int LOG_TRACE= get_LOG_TRACE()
+	int filterLevel=(filterLog)?filterLog.toInteger():get_LOG_WARN()
 
 	if (filterLevel >= traceLevel) {
 		if (displayEvent) {    
@@ -884,7 +945,7 @@ int filterLevel=(filterLog)?filterLog.toInteger():get_LOG_WARN()
 
 
 private send(msg, askAlexa=false) {
-int MAX_EXCEPTION_MSG_SEND=5
+	int MAX_EXCEPTION_MSG_SEND=5
 
 	// will not send exception msg when the maximum number of send notifications has been reached
 	if (msg.contains("exception")) {
@@ -902,14 +963,24 @@ int MAX_EXCEPTION_MSG_SEND=5
 		if (location.contactBookEnabled && recipients) {
 			traceEvent(settings.logFilter,"contact book enabled", false, get_LOG_INFO())
 			sendNotificationToContacts(message, recipients)
-    	} else {
+		} else {
 			traceEvent(settings.logFilter,"contact book not enabled", false, get_LOG_INFO())
 			sendPush(message)
 		}            
 	}
 	if (askAlexa) {
-		sendLocationEvent(name: "AskAlexaMsgQueue", value: "${get_APP_NAME()}", isStateChange: true, descriptionText: msg)        
-	}        
+		def expiresInDays=(AskAlexaExpiresInDays)?:5    
+		sendLocationEvent(
+			name: "AskAlexaMsgQueue", 
+			value: "${get_APP_NAME()}", 
+			isStateChange: true, 
+			descriptionText: msg, 
+			data:[
+				queues: listOfMQs,
+				expires: (expiresInDays*24*60*60)  /* Expires after 5 days by default */
+			]
+		)
+	} /* End if Ask Alexa notifications*/
 	
 	if (phoneNumber) {
 		log.debug("sending text message")
@@ -917,6 +988,10 @@ int MAX_EXCEPTION_MSG_SEND=5
 	}
 }
 
+
+def getCustomImagePath() {
+	return "http://raw.githubusercontent.com/yracine/device-type.myecobee/master/icons/"
+}    
 
 
 private def get_APP_NAME() {

@@ -18,6 +18,7 @@
  * Change the mode manually (by pressing the app's play button) and automatically at the ecobee thermostat(s)
  * If you need to set it for both Away and Home modes, you'd need to save them as 2 distinct apps
  * Don't forget to set the app to run only for the target mode.
+ *
  *  N.B. Requires MyEcobee device available at 
  *          http://www.ecomatiqhomes.com/#!store/tc3yr 
  */
@@ -26,7 +27,7 @@ definition(
 	namespace: "yracine",
 	author: "Yves Racine",
 	description:
-	"Change the mode manually (by pressing the app's play button) and automatically at the ecobee thermostat(s)",
+	"Change the ecobee program manually (by pressing the app's play button) and automatically at the ecobee thermostat(s) based on the ST hello mode(s)",
 	category: "My Apps",
 	iconUrl: "https://s3.amazonaws.com/smartapp-icons/Partner/ecobee.png",
 	iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Partner/ecobee@2x.png"
@@ -39,9 +40,9 @@ preferences {
 		section("About") {
 			paragraph "ecobeeChangeMode, the smartapp that sets your ecobee thermostat to a given program/climate ['Away', 'Home', 'Night']" + 
                 		" based on ST hello mode."
-			paragraph "Version 1.9.7" 
+			paragraph "Version 1.9.9a" 
 			paragraph "If you like this smartapp, please support the developer via PayPal and click on the Paypal link below " 
-				href url: "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=yracine%40yahoo%2ecom&lc=US&item_name=Maisons%20ecomatiq&no_note=0&currency_code=USD&bn=PP%2dDonationsBF%3abtn_donateCC_LG%2egif%3aNonHostedGuest",
+				href url: "https://www.paypal.me/ecomatiqhomes",
 					title:"Paypal donation..."
 			paragraph "Copyright©2014 Yves Racine"
 				href url:"http://github.com/yracine/device-type.myecobee", style:"embedded", required:false, title:"More information..."  
@@ -156,11 +157,13 @@ def changeMode(evt) {
 }
 
 private void takeAction() {
-	def message = "ecobeeChangeMode>setting the thermostat(s) to $givenClimate.."
+	def message = "ecobeeChangeMode>setting ${thermostats} to ${givenClimate}.."
 	send(message)
 	log.debug (message)
     
-	thermostats?.setThisTstatClimate(givenClimate)
+	thermostats.each {
+		it?.setThisTstatClimate(givenClimate)
+	}        
 }
 
 
